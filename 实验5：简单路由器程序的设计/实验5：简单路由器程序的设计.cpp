@@ -81,33 +81,27 @@ DWORD dwThreadId;
 int n;
 FILE* fp = nullptr;
 
-BYTE broadcast[6] = { 0xff,0xff,0xff,0xff,0xff,0xff };
-void GetOtherMac(DWORD ip0, BYTE mac[])
+uint8_t broadcast[6] = { 0xff,0xff,0xff,0xff,0xff,0xff };
+void GetMac(uint32_t ip0, uint8_t mac[])
 {
 	memset(mac, 0, sizeof(mac));
 	ARPFrame_t ARPFrame;
-	//将APRFrame.FrameHeader.DesMAC设置为广播地址
-	for (int i = 0; i < 6; i++)
-		ARPFrame.FrameHeader.DesMAC[i] = 0xff;
-	//将APRFrame.FrameHeader.SrcMAC设置为本机网卡的MAC地址
 	for (int i = 0; i < 6; i++)
 	{
+		ARPFrame.FrameHeader.DesMAC[i] = 0xff;      //广播
 		ARPFrame.FrameHeader.SrcMAC[i] = MyMAC[i];
 		ARPFrame.SendMAC[i] = MyMAC[i];
-	}
-	ARPFrame.FrameHeader.FrameType = htons(0x0806);//帧类型为ARP
-	ARPFrame.Hardware_Type = htons(0x0001);//硬件类型为以太网
-	ARPFrame.Protocol_Type = htons(0x0800);//协议类型为IP
-	ARPFrame.HALen = 6;//硬件地址长度为6
-	ARPFrame.PALen = 4;//协议地址长为4
-	ARPFrame.Operation = htons(0x0001);//操作为ARP请求
-	//将ARPFrame.SendIP设置为本机网卡上绑定的IP地址
-	ARPFrame.SendIP = inet_addr(ip[0]);
-	//将ARPFrame.RecvHa设置为0
-	for (int i = 0; i < 6; i++)
-	{
 		ARPFrame.RecvMAC[i] = 0;
 	}
+
+	ARPFrame.FrameHeader.FrameType = htons(0x806);  //帧类型为ARP
+	ARPFrame.Hardware_Type = htons(0x0001);         //硬件类型为以太网
+	ARPFrame.Protocol_Type = htons(0x0800);         //协议类型为IP
+	ARPFrame.HALen = 6;                             //硬件地址长度为6
+	ARPFrame.PALen = 4;                             //协议地址长为4
+	ARPFrame.Operation = htons(0x0001);             //操作为ARP请求
+
+	ARPFrame.SendIP = inet_addr(ip[0]);
 	//将ARPFrame.RecvIP设置为请求的IP地址
 	ARPFrame.RecvIP = ip0;
 	if (pcap_handle == nullptr)
@@ -130,7 +124,6 @@ void GetOtherMac(DWORD ip0, BYTE mac[])
 				pcap_pkthdr* pkt_header;
 				const u_char* pkt_data;
 				int rtn = pcap_next_ex(pcap_handle, &pkt_header, &pkt_data);
-				//pcap_sendpacket(ahandle, (u_char*)&ARPFrame, sizeof(ARPFrame_t));
 				if (rtn == 1)
 				{
 					ARPFrame_t* IPPacket = (ARPFrame_t*)pkt_data;
@@ -171,8 +164,7 @@ public:
 	uint32_t Mask;//掩码
 	uint32_t Net;//目的网络
 	uint32_t NextIP;//下一跳
-	uint8_t NexMAC[6];
-	int index;//第几条
+	int index;
 	int type;//0为直接连接，1为用户添加
 	RouterItem* NextItem;
 	RouterItem() { memset(this, 0, sizeof(*this)); }//全部初始化为0
@@ -184,52 +176,17 @@ class RouterTable//路由表
 {
 public:
 	RouterItem* head, * tail;
-	int num;//条数
 	RouterTable();//初始化，添加直接相连的网络
 	void RouterAdd(RouterItem* temp);
 	void RouterRemove(int index);
-	void print()
-	{
-		for (RouterItem* ptr = head->NextItem; ptr != tail; ptr = ptr->NextItem)
-		{
-			// 打印索引值
-			printf("%d ", ptr->index);
-
-			// 依次打印 Mask、Net 和 NextIP 的点分十进制形式的 IP 地址
-			struct in_addr addr;
-
-			addr.s_addr = ptr->Mask;
-			printf("%s\t", inet_ntoa(addr));
-
-			addr.s_addr = ptr->Net;
-			printf("%s\t", inet_ntoa(addr));
-
-			addr.s_addr = ptr->NextIP;
-			printf("%s\t", inet_ntoa(addr));
-
-			// 打印类型 type
-			printf("%d\n",ptr-> type);
-
-		}
-	}
-	DWORD RouterFind(DWORD ip)//查找最长前缀，返回下一跳的ip
-	{
-		for (RouterItem* t = head->NextItem; t != tail; t = t->NextItem)
-		{
-			if ((t->Mask & ip) == t->Net)
-			{
-				return t->NextIP;
-			}
-		}
-		return -1;
-	}
+	void print();
+	uint32_t RouterFind(uint32_t IP);
 };
 RouterTable::RouterTable()
 {
 	head = new RouterItem;
 	tail = new RouterItem;
 	head->NextItem = tail;
-	num = 0;
 	for (int i = 0; i < 2; i++)
 	{
 		RouterItem* temp = new RouterItem;
@@ -266,7 +223,6 @@ void RouterTable::RouterAdd(RouterItem* temp)
 	{
 		ptr->index = i;
 	}
-	num++;
 }
 void RouterTable::RouterRemove(int index) {
 	RouterItem* ptr;
@@ -295,6 +251,42 @@ void RouterTable::RouterRemove(int index) {
 	printf("无该表项\n");
 	
 }
+uint32_t RouterTable::RouterFind(uint32_t IP)
+{
+	for (RouterItem* ptr = head->NextItem; ptr != tail; ptr = ptr->NextItem)
+	{
+		if ((ptr->Mask & IP) == ptr->Net)
+		{
+			return ptr->NextIP;
+		}
+	}
+	return 0;
+}
+
+void RouterTable::print() 
+{
+	for (RouterItem* ptr = head->NextItem; ptr != tail; ptr = ptr->NextItem)
+	{
+		// 打印索引值
+		printf("%d ", ptr->index);
+
+		// 依次打印 Mask、Net 和 NextIP 的点分十进制形式的 IP 地址
+		struct in_addr addr;
+
+		addr.s_addr = ptr->Mask;
+		printf("%s\t", inet_ntoa(addr));
+
+		addr.s_addr = ptr->Net;
+		printf("%s\t", inet_ntoa(addr));
+
+		addr.s_addr = ptr->NextIP;
+		printf("%s\t", inet_ntoa(addr));
+
+		// 打印类型 type
+		printf("%d\n", ptr->type);
+
+	}
+}
 #pragma pack()
 
 #pragma pack(1)
@@ -307,7 +299,7 @@ public:
 	static void InsertArp(DWORD ip, BYTE mac[6])
 	{
 		arptable[num].ip = ip;
-		GetOtherMac(ip, arptable[num].mac);
+		GetMac(ip, arptable[num].mac);
 		memcpy(mac, arptable[num].mac, 6);
 		num++;
 	}
