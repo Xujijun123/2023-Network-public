@@ -293,17 +293,17 @@ void RouterTable::print()
 class ArpTable//ARP表（将IP和MAC的对应关系存储在一张表里）
 {
 public:
-	DWORD ip;
-	BYTE mac[6];
+	uint32_t ip;
+	uint8_t mac[6];
 	static int num;
-	static void InsertArp(DWORD ip, BYTE mac[6])
+	static void InsertArp(uint32_t ip, uint8_t mac[6])
 	{
 		arptable[num].ip = ip;
 		GetMac(ip, arptable[num].mac);
 		memcpy(mac, arptable[num].mac, 6);
 		num++;
 	}
-	static int FindArp(DWORD ip, BYTE mac[6])
+	static int FindArp(uint32_t ip, uint8_t mac[6])
 	{
 		memset(mac, 0, 6);
 		for (int i = 0; i < num; i++)
@@ -360,6 +360,7 @@ bool CheckSum(DataPackage* temp)
 		return 0;
 	}
 }
+
 int ArpTable::num = 0;
 void resend(ICMP_t data, BYTE desmac[])
 {
@@ -369,6 +370,31 @@ void resend(ICMP_t data, BYTE desmac[])
 	temp->IPHeader.TTL -= 1;
 	if (temp->IPHeader.TTL == 0)
 	{
+		printf("aaa\n");
+		ICMP_t icmpPacket;
+		memcpy(&icmpPacket.FrameHeader.DesMAC, &data.FrameHeader.SrcMAC, 6); // 目的MAC为原始数据包的源MAC
+		memcpy(&icmpPacket.FrameHeader.SrcMAC, &data.FrameHeader.DesMAC, 6); // 源MAC为本机MAC
+		icmpPacket.FrameHeader.FrameType = 0x0800; // 填写 ICMP 数据包的帧类型（IP类型）
+		icmpPacket.IPHeader.Header_Length = 0x45; // 版本为 IPv4，头部长度为 20 字节
+		icmpPacket.IPHeader.TOS = 0; // 服务类型为 0
+		icmpPacket.IPHeader.Total_Length = htons(sizeof(ICMP_t) - sizeof(FrameHeader_t)); // IP数据报长度
+		icmpPacket.IPHeader.ID = htons(0); // 填写 ID
+		icmpPacket.IPHeader.ip_offset = htons(0x4000); // 标志和偏移量
+		icmpPacket.IPHeader.TTL = 64; // TTL 设置为 64 或者其他你想要的值
+		icmpPacket.IPHeader.Protocol = 1; // ICMP 协议
+		icmpPacket.IPHeader.Checksum = 0; // 先将校验和置为 0
+		icmpPacket.IPHeader.SrcIP = inet_addr(ip[0]); // ICMP 数据包的源IP为原始数据包的目的IP
+		icmpPacket.IPHeader.DesIP = data.IPHeader.SrcIP; // ICMP 数据包的目的IP为原始数据包的源IP
+		icmpPacket.buf[0] = 11;
+		icmpPacket.buf[1] = 0;
+		temp= (DataPackage*)&icmpPacket;
+		// 计算 ICMP 校验和
+		SetCheckSum((DataPackage*)&icmpPacket);;
+		int rtn = pcap_sendpacket(pcap_handle, (const u_char*)&icmpPacket, 70);
+		if (rtn == 0)
+		{
+			printf("kkk\n");
+		}
 		return;
 	}
 	SetCheckSum(temp);//重新设置校验和
